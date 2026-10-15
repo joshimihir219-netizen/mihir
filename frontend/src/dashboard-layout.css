@@ -1,0 +1,1433 @@
+.grid4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  align-items: stretch;
+}
+
+@container (max-width: 760px) {
+  .grid4 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .mainGrid,
+  .bottomGrid,
+  .riskGrid,
+  .strategyGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .indicatorCards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .signalPanel {
+    min-width: 0;
+  }
+}
+
+@container (max-width: 460px) {
+  .grid4,
+  .indicatorCards {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .content {
+    padding: 18px;
+  }
+}
+
+.sidebar {
+  width: var(--sidebar-width, 245px);
+  padding-right: 18px;
+}
+
+.supportContact {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 12px 5px 0;
+  font-size: 11px;
+}
+
+.supportContact span {
+  color: #718096;
+}
+
+.supportContact a {
+  color: #79bdff;
+  overflow-wrap: anywhere;
+  text-decoration: none;
+}
+
+.supportContact a:hover {
+  text-decoration: underline;
+}
+
+main {
+  width: calc(100% - var(--sidebar-width, 245px));
+  margin-left: var(--sidebar-width, 245px);
+}
+
+.sidebarResizeHandle {
+  position: absolute;
+  z-index: 10;
+  top: 0;
+  right: -3px;
+  width: 7px;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.sidebarResizeHandle:hover,
+.sidebarResizeHandle:focus-visible {
+  background: #258eff88;
+  outline: none;
+}
+
+.profileCard {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  margin: 0 0 22px;
+  padding: 10px;
+  border: 1px solid #1c2938;
+  border-radius: 9px;
+  background: #0d141e;
+  color: #e9eef6;
+  text-align: left;
+}
+
+.profileCard:hover {
+  border-color: #287dba;
+  background: #101d2b;
+}
+
+.profileCardAvatar {
+  display: grid;
+  flex: 0 0 34px;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 50%;
+  background: #172538;
+  color: #9fcfff;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.profileCardText {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.profileCardText strong,
+.profileCardText small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.profileCardText strong {
+  color: #f3f7ff;
+  font-size: 12px;
+}
+
+.profileCardText small {
+  color: #8290a3;
+  font-size: 10px;
+}
+
+.profileEditHint {
+  color: #7e91a9;
+  font-size: 10px;
+}
+
+.notificationWrap {
+  position: relative;
+}
+
+.developerProfile {
+  position: relative;
+}
+
+.developerPopover {
+  position: absolute;
+  z-index: 15;
+  top: calc(100% + 12px);
+  right: 0;
+  display: flex;
+  min-width: 170px;
+  flex-direction: column;
+  gap: 5px;
+  padding: 12px 14px;
+  border: 1px solid #263547;
+  border-radius: 9px;
+  background: #0c131d;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.45);
+}
+
+.developerPopoverHead,
+.notificationPanelActions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.developerPopover small {
+  color: #8290a3;
+  font-size: 10px;
+}
+
+.developerPopover strong {
+  color: #f3f7ff;
+  font-size: 13px;
+}
+
+.notificationButton {
+  position: relative;
+  display: grid;
+  place-items: center;
+}
+
+.notificationCount {
+  position: absolute;
+  top: -5px;
+  right: -7px;
+  display: grid;
+  min-width: 17px;
+  height: 17px;
+  place-items: center;
+  padding: 0 4px;
+  border: 2px solid #090f17;
+  border-radius: 999px;
+  background: #ff6178;
+  color: white;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.notificationPanel {
+  position: absolute;
+  z-index: 15;
+  top: calc(100% + 14px);
+  right: -70px;
+  width: min(370px, calc(100vw - 28px));
+  overflow: hidden;
+  border: 1px solid #263547;
+  border-radius: 11px;
+  background: #0c131d;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
+  color: #e9eef6;
+}
+
+.notificationPanelHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid #1c2938;
+}
+
+.notificationPanelActions {
+  justify-content: flex-end;
+}
+
+.popoverClose {
+  border: 1px solid #263547;
+  border-radius: 5px;
+  padding: 4px 8px;
+  background: #111b28;
+  color: #dce5ef;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.popoverClose:hover {
+  border-color: #438bc5;
+  background: #15263a;
+}
+
+.notificationPanelHead > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.notificationPanelHead strong {
+  color: #fff;
+  font-size: 13px;
+}
+
+.notificationPanelHead small {
+  color: #8493a8;
+  font-size: 10px;
+}
+
+.notificationPanelHead .linkButton:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.notificationList {
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.notificationItem {
+  display: flex;
+  align-items: flex-start;
+  width: 100%;
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid #172230;
+  border-top: 0;
+  border-left: 0;
+  border-right: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.notificationItem:hover,
+.notificationItem:focus-visible {
+  background: #142234;
+  outline: none;
+}
+
+.notificationItem.unread {
+  background: #101d2b;
+}
+
+.notificationItem p {
+  margin: 0 0 5px;
+  color: #dce5ef;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.notificationItem time {
+  color: #758398;
+  font-size: 9px;
+}
+
+.notificationItemContent {
+  flex: 1;
+  min-width: 0;
+}
+
+.optionNotificationCard {
+  overflow: hidden;
+  border: 1px solid #263547;
+  border-radius: 8px;
+  background: #0c131d;
+}
+
+.optionNotificationCard.expanded {
+  margin: 20px 0;
+}
+
+.optionNotificationHeading,
+.optionNotificationContract,
+.optionNotificationPrices {
+  padding: 10px 12px;
+}
+
+.optionNotificationHeading {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 6px 10px;
+  border-bottom: 1px solid #1c2938;
+}
+
+.optionNotificationHeading strong {
+  color: #e9eef6;
+  font-size: 11px;
+}
+
+.optionNotificationHeading span {
+  color: #35d49a;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.optionNotificationContract {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.optionNotificationContract b {
+  color: #f3f7ff;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.optionNotificationContract span,
+.optionNotificationContract time {
+  color: #98a8bd;
+  font-size: 10px;
+}
+
+.optionNotificationPrices {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  background: #111b28;
+}
+
+.optionNotificationPrices div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.optionNotificationPrices div:nth-child(2) {
+  text-align: center;
+}
+
+.optionNotificationPrices div:last-child {
+  text-align: right;
+}
+
+.optionNotificationPrices span {
+  color: #8493a8;
+  font-size: 9px;
+}
+
+.optionNotificationPrices b {
+  color: #e9eef6;
+  font-size: 11px;
+}
+
+.optionNotificationCard > small {
+  display: block;
+  padding: 8px 12px;
+  color: #8493a8;
+  font-size: 9px;
+}
+
+.notificationDot {
+  flex: 0 0 7px;
+  width: 7px;
+  height: 7px;
+  margin-top: 4px;
+  border-radius: 50%;
+  background: #59b8ff;
+}
+
+.notificationDot.warning {
+  background: #f4c34c;
+}
+
+.notificationDot.success {
+  background: #35d49a;
+}
+
+.notificationEmpty {
+  margin: 0;
+  padding: 20px 16px;
+  color: #8fa0b6;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.notificationDetailDialog {
+  width: min(440px, 100%);
+}
+
+.notificationDetailDialog .panelHead h2 {
+  margin: 6px 0 0;
+  color: #fff;
+  font-size: 20px;
+}
+
+.notificationDetailMessage {
+  margin: 22px 0;
+  color: #dce5ef;
+  font-size: 14px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.notificationDetailMeta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid #1c2938;
+  color: #8290a3;
+  font-size: 11px;
+  text-transform: capitalize;
+}
+
+.notificationDetailMeta time {
+  margin-left: auto;
+  color: #758398;
+}
+
+.profileDialogBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(2, 7, 13, 0.78);
+  backdrop-filter: blur(5px);
+}
+
+.profileDialog {
+  width: min(480px, 100%);
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: 22px;
+  border: 1px solid #26384e;
+  border-radius: 14px;
+  background: #0c131d;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.55);
+}
+
+.profileDialog .panelHead h2 {
+  margin: 6px 0 0;
+  color: #fff;
+  font-size: 20px;
+}
+
+.profileDialog label {
+  display: block;
+  margin: 16px 0;
+  color: #9aabc1;
+  font-size: 11px;
+}
+
+.profileDialog input {
+  display: block;
+  width: 100%;
+  margin-top: 7px;
+  padding: 10px;
+  border: 1px solid #263548;
+  border-radius: 6px;
+  background: #101a26;
+  color: #f3f7ff;
+}
+
+.profilePrivacyNote {
+  margin: 14px 0;
+  color: #8290a3;
+  font-size: 11px;
+}
+
+.telegramIdSuggestion {
+  margin: 14px 0;
+  color: #9aabc1;
+  font-size: 11px;
+}
+
+.telegramIdSuggestion summary {
+  color: #c6d4e5;
+  cursor: pointer;
+}
+
+.telegramIdSuggestion p {
+  margin: 8px 0 0;
+  line-height: 1.5;
+}
+
+.telegramIdSuggestion a {
+  color: #65b5ff;
+}
+
+.telegramTestActions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.telegramTestActions span {
+  color: #8290a3;
+  font-size: 11px;
+}
+
+.profileDialogActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.durationInputGroup {
+  display: flex;
+  gap: 8px;
+}
+
+.durationInputGroup input {
+  min-width: 0;
+  flex: 1;
+}
+
+.durationInputGroup select {
+  width: 110px;
+}
+
+.marketChartControls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.marketChartControls label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: #8190a5;
+  font-size: 10px;
+}
+
+.marketChartControls select {
+  max-width: 150px;
+}
+
+.priceChartSvg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.priceChartGridLine {
+  stroke: rgba(255, 255, 255, 0.06);
+  stroke-width: 1;
+}
+
+.priceChartScaleLabel {
+  fill: #ffffff;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.priceChartUp {
+  color: #35d49a;
+}
+
+.priceChartDown {
+  color: #ff6f83;
+}
+
+.priceChartWick {
+  stroke: currentColor;
+  stroke-width: 1.25;
+  vector-effect: non-scaling-stroke;
+}
+
+.priceChartCandleBody {
+  fill: currentColor;
+  stroke: currentColor;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.chartPanel {
+  position: relative;
+}
+
+.chartLive {
+  height: 360px;
+  margin-top: 6px;
+}
+
+.priceChartSvg {
+  overflow: hidden;
+}
+
+.priceChartSvg.drawingActive {
+  cursor: crosshair;
+}
+
+.priceChartCloseLine,
+.priceChartSma,
+.priceChartEma,
+.priceChartBollinger {
+  fill: none;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.priceChartCloseLine {
+  stroke: #46a8ff;
+}
+
+.priceChartArea {
+  fill: rgba(70, 168, 255, 0.15);
+  stroke: none;
+}
+
+.priceChartSma {
+  stroke: #f3bd54;
+}
+
+.priceChartEma {
+  stroke: #cf8cff;
+}
+
+.priceChartBollinger {
+  stroke: #66c7c0;
+  stroke-width: 1.25;
+}
+
+.priceChartDrawing {
+  stroke: #f5c34c;
+  stroke-width: 1.5;
+  stroke-dasharray: 6 4;
+  vector-effect: non-scaling-stroke;
+}
+
+.priceChartVolumeUp {
+  fill: rgba(53, 212, 154, 0.48);
+}
+
+.priceChartVolumeDown {
+  fill: rgba(255, 111, 131, 0.48);
+}
+
+.chartIntervalBar,
+.chartIndicatorBar,
+.chartRangeBar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.chartIntervalBar {
+  margin-top: 14px;
+}
+
+.chartIndicatorBar {
+  margin-top: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #1c2938;
+}
+
+.chartRangeBar {
+  margin-top: 4px;
+}
+
+.chartToolButton {
+  border: 1px solid transparent;
+  border-radius: 5px;
+  padding: 6px 8px;
+  background: transparent;
+  color: #9aa9bd;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.chartToolButton:hover:not(:disabled),
+.chartToolButton.active {
+  border-color: #294563;
+  background: #132236;
+  color: #e7f2ff;
+}
+
+.chartToolButton:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.chartToolbarDivider {
+  width: 1px;
+  height: 20px;
+  margin: 0 4px;
+  background: #263547;
+}
+
+.chartIndicatorBar label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: #8290a3;
+  font-size: 10px;
+}
+
+.chartIndicatorBar select,
+.chartAlertForm select,
+.chartAlertForm input {
+  border: 1px solid #263548;
+  border-radius: 5px;
+  padding: 6px 8px;
+  background: #111b28;
+  color: #dce5ef;
+  font-size: 10px;
+}
+
+.chartRangeStatus {
+  margin-left: auto;
+  color: #758398;
+  font-size: 10px;
+}
+
+.chartPopover {
+  position: absolute;
+  z-index: 20;
+  top: 132px;
+  right: 18px;
+  width: min(360px, calc(100% - 36px));
+  max-height: min(480px, 70vh);
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid #263547;
+  border-radius: 9px;
+  background: #0c131d;
+  box-shadow: 0 16px 42px rgba(0, 0, 0, 0.55);
+}
+
+.chartPopoverHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+  color: #f3f7ff;
+  font-size: 12px;
+}
+
+.chartPopoverHead button,
+.chartAlertRow button {
+  border: 0;
+  background: transparent;
+  color: #9aa9bd;
+  font-size: 18px;
+  cursor: pointer;
+}
+
+.chartWatchItem,
+.chartAlertRow {
+  display: grid;
+  width: 100%;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 4px;
+  border: 0;
+  border-bottom: 1px solid #1b2837;
+  background: transparent;
+  color: #dce5ef;
+  text-align: left;
+  font-size: 10px;
+}
+
+.chartWatchItem:hover,
+.chartWatchItem.active {
+  background: #132236;
+}
+
+.chartWatchItem em {
+  font-style: normal;
+}
+
+.chartAlertForm {
+  display: grid;
+  gap: 8px;
+}
+
+.chartAlertForm label {
+  display: grid;
+  grid-template-columns: 72px 1fr;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: #9aa9bd;
+  font-size: 10px;
+}
+
+.chartAlertForm .primary {
+  padding: 8px 12px;
+  font-size: 11px;
+}
+
+.chartAlertRow {
+  grid-template-columns: 1fr auto;
+  color: #9aa9bd;
+}
+
+.chartPanel:fullscreen {
+  overflow: auto;
+  padding: 22px;
+  background: #080d14;
+}
+
+.chartPanel:fullscreen .chartLive {
+  height: calc(100vh - 285px);
+}
+
+.app,
+main,
+.content,
+.mainGrid,
+.bottomGrid {
+  min-width: 0;
+}
+
+.marketChartControls {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.marketChartControls select {
+  max-width: 125px;
+}
+
+.content {
+  width: 100%;
+  min-width: 0;
+  container-type: inline-size;
+}
+
+.pageHead,
+.marketStrip,
+.grid4,
+.mainGrid,
+.bottomGrid {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.marketStrip {
+  display: flex;
+  width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-color: #334155 #0b111a;
+  scrollbar-width: thin;
+}
+
+.marketStrip .marketPill {
+  flex: 0 0 190px;
+}
+
+.marketStrip::-webkit-scrollbar {
+  height: 6px;
+}
+
+.marketStrip::-webkit-scrollbar-track {
+  border-radius: 999px;
+  background: #0b111a;
+}
+
+.marketStrip::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: #334155;
+}
+
+.stat {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.stat > div:last-child {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.stat h2 {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  font-size: clamp(15px, 1.6vw, 21px);
+}
+
+.stat em {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 3px 6px;
+}
+
+.stat em small {
+  margin-left: 0;
+}
+
+.breadthStat {
+  min-width: 0;
+}
+
+.breadthContent {
+  min-width: 0;
+  flex: 1;
+}
+
+.breadthContent h2 {
+  white-space: nowrap;
+  font-size: 16px;
+}
+
+.breadthContent h2 small {
+  color: #aab8ca;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.breadthContent em {
+  display: block;
+  margin-top: 6px;
+  color: #8fa0b6;
+  font-size: 10px;
+  font-style: normal;
+}
+
+.breadthMeter {
+  display: flex;
+  width: 100%;
+  height: 6px;
+  overflow: hidden;
+  margin-top: 8px;
+  border-radius: 999px;
+  background: #1b2634;
+}
+
+.breadthMeter span {
+  height: 100%;
+  min-width: 0;
+}
+
+.breadthAdvance {
+  background: #35d49a;
+}
+
+.breadthDecline {
+  background: #ff6f83;
+}
+
+.optionDemoBadge {
+  padding: 8px 11px;
+  border: 1px solid #8b6c2f;
+  border-radius: 7px;
+  background: #332813;
+  color: #ffda88;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.optionWorkspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(270px, 0.85fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.optionChainPanel,
+.optionTradePanel,
+.optionOrdersPanel {
+  min-width: 0;
+  padding: 18px;
+}
+
+.optionSubheading {
+  margin: 5px 0 0;
+  color: #9bacbf;
+  font-size: 12px;
+}
+
+.optionControls {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 16px 0 12px;
+}
+
+.optionControls label,
+.optionTradeForm label {
+  display: grid;
+  gap: 6px;
+  color: #bac8d8;
+  font-size: 12px;
+}
+
+.optionControls select,
+.optionTradeForm select,
+.optionTradeForm input {
+  width: 100%;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid #28384a;
+  border-radius: 6px;
+  background: #0d141e;
+  color: #eef4fb;
+}
+
+.optionUnderlyingStats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  padding: 10px 0;
+  color: #9bacbf;
+  font-size: 11px;
+}
+
+.optionUnderlyingStats b {
+  margin-left: 4px;
+  color: #e5edf6;
+}
+
+.optionChainScroll {
+  max-height: 430px;
+  overflow: auto;
+  border: 1px solid #223044;
+  border-radius: 7px;
+}
+
+.optionChainTable {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: right;
+  font-size: 12px;
+}
+
+.optionChainTable th,
+.optionChainTable td {
+  padding: 8px;
+  border-bottom: 1px solid #1c2938;
+  white-space: nowrap;
+}
+
+.optionChainTable thead {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #111b28;
+  color: #aebed0;
+}
+
+.optionChainTable th:nth-child(3),
+.optionChainTable td:nth-child(3) {
+  text-align: center;
+}
+
+.optionChainTable tbody tr:last-child > * {
+  border-bottom: 0;
+}
+
+.optionChainTable .selectedStrike {
+  background: #142338;
+}
+
+.optionChainTable tbody th {
+  color: #f0f5fb;
+}
+
+.optionChainTable tbody th small {
+  color: #55c7a1;
+  font-size: 9px;
+}
+
+.optionSelectButton {
+  padding: 5px 8px;
+  border: 1px solid #314259;
+  border-radius: 5px;
+  background: #121c29;
+  color: #b8c7d8;
+  cursor: pointer;
+}
+
+.optionSelectButton.active {
+  border-color: #3288d5;
+  background: #16395c;
+  color: #e5f4ff;
+}
+
+.optionContractSummary {
+  display: grid;
+  gap: 7px;
+  margin: 14px 0;
+  padding: 13px;
+  border: 1px solid #28394c;
+  border-radius: 8px;
+  background: #101a27;
+}
+
+.optionContractSummary span {
+  color: #b7c7d8;
+  font-size: 12px;
+}
+
+.optionContractSummary strong {
+  color: #f1f6fc;
+  font-size: 23px;
+}
+
+.optionContractSummary small {
+  color: #d8b974;
+  font-size: 11px;
+}
+
+.optionTradeForm {
+  display: grid;
+  gap: 12px;
+}
+
+.optionTradeForm .primary {
+  width: 100%;
+}
+
+.optionTradeForm .primary:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.optionSignal {
+  margin-top: 16px;
+  padding: 12px;
+  border-left: 3px solid #498cc5;
+  border-radius: 4px;
+  background: #101a27;
+  color: #d5e1ed;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.optionSignal .eyebrow {
+  margin: 0 0 7px;
+  color: #82c5f6;
+}
+
+.optionSignalMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 14px;
+  margin-bottom: 9px;
+  color: #9bacbf;
+  font-size: 11px;
+}
+
+.optionSignalMeta b {
+  margin-left: 4px;
+  color: #e1ebf5;
+}
+
+.optionSignalControls {
+  margin: 8px 0 10px;
+}
+
+.optionSignalControls label {
+  display: grid;
+  max-width: 310px;
+  gap: 5px;
+  color: #aebed0;
+  font-size: 11px;
+}
+
+.optionSignalControls select {
+  width: 100%;
+  padding: 7px 9px;
+  border: 1px solid #28384a;
+  border-radius: 5px;
+  background: #0d141e;
+  color: #eef4fb;
+}
+
+.optionSignalDetails {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.optionSignalDetails > div {
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid #223044;
+  border-radius: 5px;
+  background: #0d141e;
+}
+
+.optionSignalDetails dt {
+  margin-bottom: 4px;
+  color: #9bacbf;
+  font-size: 10px;
+}
+
+.optionSignalDetails dd {
+  margin: 0;
+  color: #edf4fb;
+  font-size: 12px;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+
+.optionSignal p:not(.eyebrow) {
+  margin: 0 0 6px;
+}
+
+.optionSignal small {
+  color: #9bacbf;
+}
+
+.optionError {
+  color: #ff929d;
+  font-size: 12px;
+}
+
+.optionOrdersPanel {
+  margin-top: 16px;
+}
+
+.optionOrdersList {
+  display: grid;
+  gap: 8px;
+}
+
+.optionOrderRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid #1c2938;
+  font-size: 12px;
+}
+
+.optionOrderRow b {
+  color: #edf4fb;
+}
+
+.optionOrderRow span,
+.optionOrderRow small,
+.optionOrdersPanel .panelHead > small {
+  color: #9bacbf;
+}
+
+.optionOrderRow small {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 900px) {
+  .optionWorkspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 600px) {
+  .optionControls {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .optionChainPanel,
+  .optionTradePanel,
+  .optionOrdersPanel {
+    padding: 12px;
+  }
+
+  .optionChainTable th,
+  .optionChainTable td {
+    padding: 7px 5px;
+    font-size: 10px;
+  }
+}
+
+@media (max-width: 900px) {
+  .sidebar {
+    width: var(--sidebar-width, 245px);
+    transform: none;
+  }
+
+  .brand div:not(.brandIcon),
+  .sectionLabel,
+  .nav:not(.active)::after,
+  .nav {
+    font-size: 12px;
+  }
+
+  .nav {
+    justify-content: flex-start;
+  }
+
+  .sidebarBottom {
+    display: block;
+  }
+
+  main {
+    width: calc(100% - var(--sidebar-width, 245px));
+    margin-left: var(--sidebar-width, 245px);
+  }
+
+  .grid4 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .breadthStat {
+    min-height: 96px;
+  }
+}
+
+@media (max-width: 650px) {
+  .sidebar {
+    width: min(300px, 85vw);
+    transform: translateX(-100%);
+    transition: transform 0.2s;
+  }
+
+  .sidebarResizeHandle {
+    display: none;
+  }
+
+  .sidebar.open {
+    transform: translateX(0);
+  }
+
+  main {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .chartLive {
+    height: 280px;
+  }
+
+  .chartPopover {
+    top: 150px;
+    right: 10px;
+    width: calc(100% - 20px);
+  }
+}
+
+@media (max-width: 600px) {
+  .grid4 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .breadthStat {
+    min-height: auto;
+  }
+
+  .sidebar {
+    width: min(300px, 85vw);
+  }
+
+  main {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .mobileMenu {
+    display: block;
+  }
+
+  .chartRangeStatus {
+    width: 100%;
+    margin: 4px 0 0;
+  }
+}
