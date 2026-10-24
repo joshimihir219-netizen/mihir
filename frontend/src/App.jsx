@@ -20,14 +20,27 @@ const nav = [
   ["Dashboard", LayoutDashboard], ["Signals", Activity], ["Options Trading", TrendingUp], ["Backtesting", FlaskConical],
   ["Risk Management", ShieldCheck], ["Reports", FileText], ["Strategies", Settings]
 ];
-const defaultStrategies = [
-  {name: "AI Momentum", risk: "Medium", status: "ACTIVE", description: "Combines SMA, RSI and MACD conditions for signal generation."},
-  {name: "RSI Reversal", risk: "Medium", status: "READY", description: "Uses RSI oversold/overbought zones for reversal entries."},
-  {name: "Breakout Momentum", risk: "High", status: "READY", description: "Focuses on strong index breakouts with confirmation volume and trend follow-through."},
-  {name: "VWAP Trend", risk: "Medium", status: "READY", description: "Tracks trend direction using VWAP and short-term moving-average alignment."},
-  {name: "Mean Reversion", risk: "Low", status: "READY", description: "Captures oversold bounce opportunities near key support zones."},
-  {name: "Swing Breakout", risk: "High", status: "READY", description: "Trades clean breakouts in directional sessions with risk-managed exits."}
-];
+const strategyDescriptions = {
+  "EMA Trend": "EMA alignment with RSI momentum confirmation.",
+  "RSI Reversal": "RSI crosses out of oversold or overbought zones.",
+  "Breakout Momentum": "Prior channel breakout with volume confirmation.",
+  "VWAP Trend": "Session VWAP and EMA alignment; requires traded volume.",
+  "Mean Reversion": "Price re-enters Bollinger bands after an excursion."
+};
+const defaultStrategies = Object.entries(strategyDescriptions).map(([name, description]) => ({
+  name, template: name, description, fast: 12, slow: 26, lookback: 20,
+  oversold: 30, overbought: 70, volume_multiplier: 1, risk: "Medium", status: "READY"
+}));
+function strategyConfig(strategy){
+  const {name, template, fast, slow, lookback, oversold, overbought, volume_multiplier} = strategy;
+  return {name, template, fast, slow, lookback, oversold, overbought, volume_multiplier};
+}
+async function fetchJson(url, options){
+  const response = await fetch(url, options);
+  const result = await response.json();
+  if (!response.ok) throw new Error(typeof result.detail === "string" ? result.detail : "Invalid request settings.");
+  return result;
+}
 
 function toCurrency(value){
   if(typeof value === "number" && Number.isFinite(value)) return `₹${value.toLocaleString("en-IN", {maximumFractionDigits: 2})}`;
@@ -91,16 +104,16 @@ function createOptionsSignalMetadata(key){
 }
 
 function getSignalPlan(symbol, market, signal){
-  const price = Number(market?.price || 0);
+  const price = Number(signal?.reference_price || 0);
   const direction = (signal?.signal || "HOLD").toUpperCase();
-  const entryFactor = direction === "BUY" ? 0.998 : direction === "SELL" ? 1.002 : 1;
+  const entryFactor = 1;
   const exitFactor = direction === "BUY" ? 1.022 : direction === "SELL" ? 0.978 : 1.01;
   const stopLossFactor = direction === "BUY" ? 0.985 : direction === "SELL" ? 1.015 : 0.992;
 
   return {
-    entry: price ? Number((price * entryFactor).toFixed(2)) : "—",
-    exit: price ? Number((price * exitFactor).toFixed(2)) : "—",
-    stopLoss: price ? Number((price * stopLossFactor).toFixed(2)) : "—",
+    entry: price && direction !== "HOLD" ? Number((price * entryFactor).toFixed(2)) : "—",
+    exit: price && direction !== "HOLD" ? Number((price * exitFactor).toFixed(2)) : "—",
+    stopLoss: price && direction !== "HOLD" ? Number((price * stopLossFactor).toFixed(2)) : "—",
     symbol: symbol || "Market",
     bias: direction === "BUY" ? "Bullish" : direction === "SELL" ? "Bearish" : "Neutral"
   };
@@ -131,12 +144,14 @@ function App(){
   const [backtest, setBacktest] = useState(null);
   const [backtestForm, setBacktestForm] = useState({
     symbol: "NIFTY 50",
-    strategy: "AI Momentum",
+    strategy: "EMA Trend",
     timeframe: "1d",
     durationValue: "30",
     durationUnit: "days",
     initialCapital: "100000",
-    positionSize: "1000",
+    positionSize: "100000",
+    feeBps: "10",
+    slippageBps: "5",
     stopLoss: "1.5"
   });
   const [searchQuery, setSearchQuery] = useState("");
@@ -204,7 +219,17 @@ function App(){
       return {stopLoss: "2.0", maxDrawdown: "8.0", dailyLoss: "5000", capitalBox: "250000"};
     }
   });
-  const [strategies, setStrategies] = useState(defaultStrategies);
+  const [strategies, setStrategies] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem("trademind-strategies-v2") || "null");
+      return Array.isArray(saved) && saved.length && saved.every((item) => item.name && strategyDescriptions[item.template]) ? saved : defaultStrategies;
+    } catch { return defaultStrategies; }
+  });
+  const [activeStrategy, setActiveStrategy] = useState("EMA Trend");
+  const [dataError, setDataError] = useState("");
+  const [backtestError, setBacktestError] = useState("");
+  const [backtestRunning, setBacktestRunning] = useState(false);
+  useEffect(() => { try { localStorage.setItem("trademind-strategies-v2", JSON.stringify(strategies)); } catch {} }, [strategies]);
   const lastSignalTelegramKeyRef = useRef("");
   const pendingSignalTelegramKeyRef = useRef("");
   const notifiedMarketSignalsRef = useRef(null);
@@ -363,35 +388,51 @@ function App(){
   };
 
   useEffect(() => {
-    const loadMarkets = () => fetch(API + "/markets").then((r) => r.json()).then(setMarkets).catch(() => {});
+    let cancelled = false;
+    let pending = false;
+    async function loadMarkets(){
+      if (pending) return;
+      pending = true;
+      try { const result = await fetchJson(API + "/markets"); if (!cancelled) setMarkets(result); }
+      catch { if (!cancelled) setMarkets([]); }
+      finally { pending = false; }
+    }
     loadMarkets();
     const timer = setInterval(loadMarkets, 15000);
-    return () => clearInterval(timer);
+    return () => { cancelled = true; clearInterval(timer); };
   }, []);
 
   useEffect(() => {
-    Promise.all([
-      fetch(API + "/market/" + encodeURIComponent(symbol) + "?interval=" + chartInterval).then((r) => r.json()),
-      fetch(API + "/signal/" + encodeURIComponent(symbol)).then((r) => r.json())
-    ])
-      .then(([m, s]) => { setMarket(m); setSignal(s); })
-      .catch(() => {});
-  }, [symbol, chartInterval]);
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      fetch(API + "/market/" + encodeURIComponent(symbol) + "?interval=" + chartInterval).then((r) => r.json()).then(setMarket).catch(() => {});
-      fetch(API + "/signal/" + encodeURIComponent(symbol)).then((r) => r.json()).then(setSignal).catch(() => {});
-    }, 15000);
-    return () => clearInterval(timer);
-  }, [symbol, chartInterval]);
+    let cancelled = false;
+    let pending = false;
+    setMarket(null); setSignal(null); setDataError("");
+    async function refresh(){
+      if (pending) return;
+      pending = true;
+      try {
+        const selected = strategies.find((item) => item.name === activeStrategy) || strategies[0];
+        const [m, result] = await Promise.all([
+          fetchJson(`${API}/market/${encodeURIComponent(symbol)}?interval=${chartInterval}`),
+          fetchJson(`${API}/signal/${encodeURIComponent(symbol)}?interval=${chartInterval}`, {
+            method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(strategyConfig(selected))
+          })
+        ]);
+        if (!cancelled) { setMarket(m); setSignal(result); setDataError(""); }
+      } catch (error) {
+        if (!cancelled) { setMarket(null); setSignal(null); setDataError(error.message); }
+      } finally { pending = false; }
+    }
+    refresh();
+    const timer = setInterval(refresh, 15000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [symbol, chartInterval, activeStrategy, strategies]);
 
   useEffect(() => {
     try { localStorage.setItem("trademind-risk-rules", JSON.stringify(riskRules)); } catch {}
   }, [riskRules]);
 
   useEffect(() => {
-    if (!isLoggedIn || !market || !signal) return;
+    if (!isLoggedIn || !market || !signal || !signal.live || signal.stale) return;
     const direction = String(signal.signal || "").toUpperCase();
     if (!["BUY", "SELL", "HOLD"].includes(direction)) return;
 
@@ -403,7 +444,7 @@ function App(){
     if (!Number.isFinite(currentPrice) || currentPrice <= 0) return;
 
     const notificationKey = `${symbol}:${localDateKey}:${direction}`;
-    const notificationMessage = `${symbol}: ${direction} signal on ${tradeDate}. Entry ${plan.entry}, Exit ${plan.exit}, Stop Loss ${plan.stopLoss}. Confidence ${signal.confidence || 0}%.`;
+    const notificationMessage = `${symbol}: ${direction} signal on ${tradeDate}. Entry ${plan.entry}, Exit ${plan.exit}, Stop Loss ${plan.stopLoss}. Strategy ${signal.strategy}.`;
     const isNewMarketSignalNotification = !notifiedMarketSignalsRef.current.has(notificationKey);
     if (isNewMarketSignalNotification) {
       notifiedMarketSignalsRef.current.add(notificationKey);
@@ -459,7 +500,7 @@ function App(){
       }
 
       if (direction === "BUY") {
-        telegramMessage = `${symbol} · BUY signal · ${tradeDate}\nSignal entry: ${formatMarketPrice(symbol, currentPrice)}\nTarget scenario: ${formatMarketPrice(symbol, activeTrade?.targetPrice || currentPrice * 1.022)}\nStop-loss scenario: ${formatMarketPrice(symbol, activeTrade?.stopPrice || currentPrice * 0.985)}\nConfidence: ${signal.confidence || 0}%\nInformational signal only. No order is placed and prices are not guaranteed.`;
+        telegramMessage = `${symbol} · BUY signal · ${tradeDate}\nSignal entry: ${formatMarketPrice(symbol, currentPrice)}\nTarget scenario: ${formatMarketPrice(symbol, activeTrade?.targetPrice || currentPrice * 1.022)}\nStop-loss scenario: ${formatMarketPrice(symbol, activeTrade?.stopPrice || currentPrice * 0.985)}\nStrategy: ${signal.strategy}\nInformational signal only. No order is placed and prices are not guaranteed.`;
       } else if (direction === "HOLD") {
         telegramMessage = activeTrade
           ? `${symbol} · HOLD existing BUY · ${tradeDate}\nCurrent: ${formatMarketPrice(symbol, currentPrice)}\nMove since signal entry (${formatMarketPrice(symbol, activeTrade.entryPrice)}): ${formatSignalMove(activeTrade.entryPrice, currentPrice)}\nTarget: ${formatMarketPrice(symbol, activeTrade.targetPrice)} · Stop: ${formatMarketPrice(symbol, activeTrade.stopPrice)}\nIndicative signal move only; actual P&L depends on your entry, quantity, and costs.`
@@ -549,24 +590,23 @@ function App(){
   }, [isLoggedIn, symbol, market, signal, telegramConfig.botToken, telegramConfig.chatId]);
 
   async function runBacktest(customForm = backtestForm){
-    const timeframe = customForm.timeframe || "1d";
-    const durationUnit = customForm.durationUnit || "days";
-    const maxDuration = maxDurationForUnit(timeframe, durationUnit);
-    const duration = Math.min(maxDuration, Math.max(1, Number(customForm.durationValue) || 1));
-    const form = {...customForm, durationValue: String(duration), durationUnit};
-    const params = new URLSearchParams({
-      symbol: form.symbol,
-      initial_capital: String(form.initialCapital || 100000),
-      timeframe,
-      duration: String(duration),
-      duration_unit: durationUnit
-    });
-    const r = await fetch(API + "/backtest?" + params.toString(), {method: "POST"});
-    const result = await r.json();
-    const merged = {...result, ...form, equity_curve: result.equity_curve || []};
-    setBacktest(merged);
-    setPage("Backtesting");
-    addLog(`Backtest executed for ${form.symbol} using ${form.strategy} strategy on ${timeframe} timeframe over ${duration} ${durationUnit}.`, "info");
+    if (backtestRunning) return;
+    setBacktestRunning(true); setBacktestError(""); setPage("Backtesting");
+    try {
+      const selected = strategies.find((item) => item.name === customForm.strategy);
+      if (!selected) throw new Error("Choose a configured strategy.");
+      const params = new URLSearchParams({
+        symbol: customForm.symbol, strategy: selected.name, initial_capital: customForm.initialCapital,
+        timeframe: customForm.timeframe, duration: customForm.durationValue, duration_unit: customForm.durationUnit,
+        position_size: customForm.positionSize, stop_loss: customForm.stopLoss,
+        fee_bps: customForm.feeBps, slippage_bps: customForm.slippageBps
+      });
+      const result = await fetchJson(`${API}/backtest?${params}`, {method: "POST",
+        headers: {"Content-Type": "application/json"}, body: JSON.stringify(strategyConfig(selected))});
+      setBacktest(result);
+      addLog(`Completed ${result.strategy} backtest: ${result.trades} trades, P&L ${result.pnl}.`, "info");
+    } catch (error) { setBacktest(null); setBacktestError(error.message); }
+    finally { setBacktestRunning(false); }
   }
 
   async function handleLogin(event){
@@ -657,22 +697,29 @@ function App(){
     addLog("Risk rules saved.", "success");
   }
 
-  function addStrategy(name){
+  function addStrategy(name, configuration){
     if (!name?.trim() || strategies.some((item) => item.name.toLowerCase() === name.trim().toLowerCase())) return false;
-    setStrategies((current) => [...current, {name: name.trim(), risk: "Medium", status: "READY", description: "Custom strategy configuration."}]);
+    setStrategies((current) => [...current, {...configuration, name: name.trim(), risk: "Medium", status: "READY", description: strategyDescriptions[configuration.template]}]);
     return true;
   }
 
-  function configureStrategy(name, risk){
+  function configureStrategy(name, risk, configuration){
     const normalizedRisk = risk.trim().toLowerCase();
     if (!["low", "medium", "high"].includes(normalizedRisk)) return false;
-    setStrategies((current) => current.map((item) => item.name === name ? {...item, risk: normalizedRisk[0].toUpperCase() + normalizedRisk.slice(1)} : item));
+    setStrategies((current) => current.map((item) => item.name === name ? {...item, ...configuration, name: item.name, description: strategyDescriptions[configuration.template], risk: normalizedRisk[0].toUpperCase() + normalizedRisk.slice(1)} : item));
     return true;
   }
 
-  function exportReport(title, scope, period){
-    const rows = [["Report", "Scope", "Period", "Generated"], [title, scope, period, new Date().toLocaleDateString()]];
-    const csv = rows.map((row) => row.map((value) => `"${String(value).replace(/"/g, '""')}"`).join(",")).join("\r\n");
+  function exportReport(){
+    if (!backtest) return;
+    const title = `${backtest.symbol}-${backtest.strategy}-backtest`;
+    const rows = [["Field", "Value"], ...Object.entries(backtest)
+      .filter(([key]) => !["equity_curve", "equity_times", "trade_ledger"].includes(key))
+      .map(([key, value]) => [key, typeof value === "object" ? JSON.stringify(value) : value]),
+      [], ["Trade ledger"], ["entry_time", "exit_time", "side", "quantity", "entry_price", "exit_price", "fees", "pnl", "reason"],
+      ...backtest.trade_ledger.map((trade) => [trade.entry_time, trade.exit_time, trade.side, trade.quantity, trade.entry_price, trade.exit_price, trade.fees, trade.pnl, trade.reason]),
+      [], ["Time", "Equity"], ...backtest.equity_curve.map((value, index) => [backtest.equity_times[index], value])];
+    const csv = rows.map((row) => row.map((value) => `"${String(typeof value === "string" && /^[=+@-]/.test(value) ? "\'" + value : value).replace(/"/g, '""')}"`).join(",")).join("\r\n");
     const url = URL.createObjectURL(new Blob([csv], {type: "text/csv;charset=utf-8"}));
     const link = document.createElement("a");
     link.href = url;
@@ -684,7 +731,7 @@ function App(){
     const message = `${title} exported as ${link.download}.`;
     setExportMessage(message);
     addLog(message, "success");
-    notifyTelegram(`Report exported: ${title} (${scope}, ${period}).`);
+
   }
 
   const notificationItems = logs.filter((entry) => entry.type === "signal");
@@ -828,12 +875,17 @@ function App(){
           </div>
         </header>
         <div className="content">
+          <div className="panel"><label>Signal strategy<select aria-label="Signal strategy" value={activeStrategy} onChange={(event) => setActiveStrategy(event.target.value)}>{strategies.map((item) => <option key={item.name}>{item.name}</option>)}</select></label>
+            <p>Signals use {chartInterval} completed candles. Refresh: 15 seconds. {market ? `${market.data_source} · ${market.status} · Price: ${market.quote_status} · Candle as of ${market.data_as_of}${market.quote_error ? ` · Quote unavailable: ${market.quote_error}` : ""}` : "Market data unavailable or loading."}</p>
+            {signal && <p>{signal.reason} · Candle: {signal.signal_time}. Rule conditions do not estimate win probability.</p>}
+            {dataError && <p role="alert">{dataError}</p>}
+          </div>
           {page === "Dashboard" && <Dashboard markets={markets} symbol={symbol} setSymbol={setSymbol} market={market} signal={signal} chartInterval={chartInterval} setChartInterval={setChartInterval} runBacktest={() => runBacktest(backtestForm)} onViewAll={() => setPage("Signals")} notifyTelegram={notifyTelegram} addLog={addLog} />}
           {page === "Signals" && <Signals symbol={symbol} setSymbol={setSymbol} signal={signal} markets={markets} market={market} notifyTelegram={notifyTelegram} addLog={addLog} />}
-          {page === "Options Trading" && <OptionsTrading symbol={symbol} setSymbol={setSymbol} signal={signal} markets={markets} market={market} addLog={addLog} />}
-          {page === "Backtesting" && <Backtesting backtest={backtest} runBacktest={() => runBacktest(backtestForm)} symbol={symbol} backtestForm={backtestForm} setBacktestForm={setBacktestForm} notifyTelegram={notifyTelegram} addLog={addLog} />}
+          {page === "Options Trading" && <OptionsTrading strategy={strategies.find((item) => item.name === activeStrategy) || strategies[0]} symbol={symbol} setSymbol={setSymbol} signal={signal} markets={markets} market={market} addLog={addLog} />}
+          {page === "Backtesting" && <Backtesting strategies={strategies} error={backtestError} running={backtestRunning} backtest={backtest} runBacktest={() => runBacktest(backtestForm)} symbol={symbol} backtestForm={backtestForm} setBacktestForm={setBacktestForm} notifyTelegram={notifyTelegram} addLog={addLog} />}
           {page === "Risk Management" && <Risk riskRules={riskRules} setRiskRules={setRiskRules} saveRiskRules={saveRiskRules} addLog={addLog} />}
-          {page === "Reports" && <Reports exportReport={exportReport} exportMessage={exportMessage} notifyTelegram={notifyTelegram} />}
+          {page === "Reports" && <Reports backtest={backtest} exportReport={exportReport} exportMessage={exportMessage} notifyTelegram={notifyTelegram} />}
           {page === "Strategies" && <Strategies strategies={strategies} addStrategy={addStrategy} configureStrategy={configureStrategy} addLog={addLog} />}
         </div>
       </main>
@@ -1040,16 +1092,16 @@ function Dashboard({markets, symbol, setSymbol, market, signal, chartInterval, s
   const marketMap = useMemo(() => Object.fromEntries((markets || []).map((item) => [item.symbol, item])), [markets]);
   const breadth = useMemo(() => {
     const indiaSymbols = ["NIFTY 50", "BANK NIFTY", "SENSEX", "RELIANCE", "TCS", "INFOSYS", "HDFC BANK", "ICICI BANK", "SBIN", "ITC", "BHARTI AIRTEL"];
-    const available = indiaSymbols.map((name) => marketMap[name]).filter(Boolean);
+    const available = indiaSymbols.map((name) => marketMap[name]).filter((item) => Number.isFinite(item?.price));
     const advancing = available.filter((item) => Number(item.change) > 0).length;
     const declining = available.filter((item) => Number(item.change) < 0).length;
     const unchanged = available.filter((item) => Number(item.change) === 0).length;
     return {advancing, declining, unchanged, total: available.length};
   }, [marketMap]);
   const marketStats = [
-    {title: "Sensex", value: marketMap["SENSEX"] ? `₹${marketMap["SENSEX"].price.toLocaleString("en-IN", {maximumFractionDigits: 2})}` : "—", delta: marketMap["SENSEX"] ? formatPercent(marketMap["SENSEX"].change) : "—", icon: "S"},
-    {title: "Nifty 50", value: marketMap["NIFTY 50"] ? `₹${marketMap["NIFTY 50"].price.toLocaleString("en-IN", {maximumFractionDigits: 2})}` : "—", delta: marketMap["NIFTY 50"] ? formatPercent(marketMap["NIFTY 50"].change) : "—", icon: "N"},
-    {title: "Bank Nifty", value: marketMap["BANK NIFTY"] ? `₹${marketMap["BANK NIFTY"].price.toLocaleString("en-IN", {maximumFractionDigits: 2})}` : "—", delta: marketMap["BANK NIFTY"] ? formatPercent(marketMap["BANK NIFTY"].change) : "—", icon: "B"}
+    {title: "Sensex", value: Number.isFinite(marketMap["SENSEX"]?.price) ? `₹${marketMap["SENSEX"].price.toLocaleString("en-IN", {maximumFractionDigits: 2})}` : "—", delta: Number.isFinite(marketMap["SENSEX"]?.price) ? formatPercent(marketMap["SENSEX"].change) : "—", icon: "S"},
+    {title: "Nifty 50", value: Number.isFinite(marketMap["NIFTY 50"]?.price) ? `₹${marketMap["NIFTY 50"].price.toLocaleString("en-IN", {maximumFractionDigits: 2})}` : "—", delta: Number.isFinite(marketMap["NIFTY 50"]?.price) ? formatPercent(marketMap["NIFTY 50"].change) : "—", icon: "N"},
+    {title: "Bank Nifty", value: Number.isFinite(marketMap["BANK NIFTY"]?.price) ? `₹${marketMap["BANK NIFTY"].price.toLocaleString("en-IN", {maximumFractionDigits: 2})}` : "—", delta: Number.isFinite(marketMap["BANK NIFTY"]?.price) ? formatPercent(marketMap["BANK NIFTY"].change) : "—", icon: "B"}
   ];
   const signalPlan = getSignalPlan(symbol, market, signal);
   const intervalChoices = [["1m", "1m"], ["2m", "2m"], ["5m", "5m"], ["15m", "15m"], ["30m", "30m"], ["60m", "60m"], ["90m", "90m"], ["1h", "1h"], ["1D", "1d"], ["5D", "5d"], ["1W", "1wk"], ["1M", "1mo"], ["3M", "3mo"]];
@@ -1193,10 +1245,10 @@ function Dashboard({markets, symbol, setSymbol, market, signal, chartInterval, s
   return (
     <>
       <div className="pageHead">
-        <div><p className="eyebrow">OVERVIEW</p><h1>Trading Dashboard</h1><p>AI-powered market intelligence and strategy monitoring.</p></div>
+        <div><p className="eyebrow">OVERVIEW</p><h1>Trading Dashboard</h1><p>Market data and transparent technical strategy monitoring.</p></div>
         <button className="primary" onClick={() => { runBacktest(); notifyTelegram(`Backtest launched for ${symbol}.`); }}>Run Backtest</button>
       </div>
-      <div className="marketStrip">{(markets || []).map((m) => <button type="button" className={"marketPill " + (m.symbol === symbol ? "selected" : "")} onClick={() => setSymbol(m.symbol)} key={m.symbol}><span>{m.symbol}</span><b>{m.price.toLocaleString()}</b><em className={m.change >= 0 ? "up" : "down"}>{m.change >= 0 ? "+" : ""}{m.change}%</em></button>)}</div>
+      <div className="marketStrip">{(markets || []).map((m) => <button type="button" className={"marketPill " + (m.symbol === symbol ? "selected" : "")} onClick={() => setSymbol(m.symbol)} key={m.symbol}><span>{m.symbol}</span><b>{Number.isFinite(m.price) ? m.price.toLocaleString() : "Unavailable"}</b><em className={m.change >= 0 ? "up" : "down"}>{Number.isFinite(m.change) ? formatPercent(m.change) : "Unavailable"}</em></button>)}</div>
       <div className="grid4">
         {marketStats.map((item) => <Stat key={item.title} title={item.title} value={item.value} delta={item.delta} icon={item.icon} />)}
         <MarketBreadth breadth={breadth} />
@@ -1204,7 +1256,7 @@ function Dashboard({markets, symbol, setSymbol, market, signal, chartInterval, s
       <div className="mainGrid">
         <div className="panel chartPanel" ref={chartPanelRef}>
           <div className="panelHead">
-            <div><h3>{symbol} · {chartInterval} <span className="liveDot">{market?.live ? "LIVE" : "DEMO"}</span></h3><span className="bigPrice">{Number(visibleMarket?.price || 0).toLocaleString(undefined, {maximumFractionDigits: 2}) || "—"}</span></div>
+            <div><h3>{symbol} · {chartInterval} <span className="liveDot">{market?.stale ? "STALE / CLOSED" : market?.live ? "BROKER CANDLES" : "DELAY POSSIBLE"}</span></h3><span className="bigPrice">{Number.isFinite(visibleMarket?.price) ? visibleMarket.price.toLocaleString(undefined, {maximumFractionDigits: 2}) : "—"}</span></div>
             <div className="marketChartControls">
               <label><span>Chart</span><select aria-label="Chart style" value={chartType} onChange={(event) => setChartType(event.target.value)}><option value="line">Line</option><option value="area">Area</option><option value="candlestick">Candlestick</option><option value="ohlc">OHLC bars</option></select></label>
               <label><span>Scale</span><select aria-label="Price scale" value={priceScale} onChange={(event) => setPriceScale(event.target.value)}><option value="linear">Linear</option><option value="log">Logarithmic</option><option value="percent">Percentage</option></select></label>
@@ -1256,13 +1308,13 @@ function Dashboard({markets, symbol, setSymbol, market, signal, chartInterval, s
           </div>
         </div>
         <div className="panel signalPanel">
-          <div className="panelHead"><h3>AI Signal</h3><span className="badge">MODEL v1.0</span></div>
-          <div className={"signal " + (signal?.signal || "HOLD").toLowerCase()}>{signal?.signal || "WAIT"}<small>{signal?.confidence || 0}% confidence</small></div>
-          <div className="meter"><span style={{width: `${signal?.confidence || 0}%`}} /></div>
+          <div className="panelHead"><h3>Strategy Signal</h3><span className="badge">MODEL v1.0</span></div>
+          <div className={"signal " + (signal?.signal || "HOLD").toLowerCase()}>{signal?.signal || "WAIT"}<small>Rule based · {signal?.strategy || "Waiting"}</small></div>
+
           <div className="indicatorRows">
             <Row name="RSI" value={signal?.rsi ?? "—"} status={signal?.rsi > 70 ? "Overbought" : "Neutral"} />
             <Row name="MACD" value={signal?.macd ?? "—"} status="Trend" />
-            <Row name="Strategy" value="AI Momentum" status="Active" />
+            <Row name="Strategy" value={signal?.strategy || "—"} status="Active" />
           </div>
           <button className="outline" type="button" onClick={() => setShowSignalDetails(true)}>View Signal Details</button>
         </div>
@@ -1280,8 +1332,8 @@ function Dashboard({markets, symbol, setSymbol, market, signal, chartInterval, s
               <button className="outline" type="button" aria-label="Close signal details" onClick={() => setShowSignalDetails(false)}>Close</button>
             </div>
             <div className="signalDetailGrid">
-              <Row name="Signal" value={signal?.signal || "WAIT"} status={`${signal?.confidence || 0}% confidence`} />
-              <Row name="Bias" value={signalPlan.bias} status={market?.live ? "Live data" : "Demo data"} />
+              <Row name="Signal" value={signal?.signal || "WAIT"} status="Rule based; no calibrated probability" />
+              <Row name="Bias" value={signalPlan.bias} status={market?.data_source || "Unavailable"} />
               <Row name="Market price" value={toCurrency(market?.price)} status={market?.updated_at ? new Date(market.updated_at).toLocaleString() : "Awaiting data"} />
               <Row name="Entry" value={toCurrency(signalPlan.entry)} status="Indicative" />
               <Row name="Target exit" value={toCurrency(signalPlan.exit)} status="Indicative" />
@@ -1293,7 +1345,7 @@ function Dashboard({markets, symbol, setSymbol, market, signal, chartInterval, s
             <div className="signalDialogActions">
               <button className="outline" type="button" onClick={() => setShowSignalDetails(false)}>Done</button>
               <button className="primary" type="button" onClick={() => {
-                const message = `${symbol}: ${signal?.signal || "WAIT"} signal with ${signal?.confidence || 0}% confidence. Entry ${signalPlan.entry}, Exit ${signalPlan.exit}, Stop Loss ${signalPlan.stopLoss}.`;
+                const message = `${symbol}: ${signal?.signal || "WAIT"} signal using ${signal?.strategy || "selected rules"}. Entry ${signalPlan.entry}, Exit ${signalPlan.exit}, Stop Loss ${signalPlan.stopLoss}.`;
                 addLog(message, "info");
                 notifyTelegram(message);
               }}>Send details to Telegram</button>
@@ -1303,7 +1355,7 @@ function Dashboard({markets, symbol, setSymbol, market, signal, chartInterval, s
       )}
       <div className="bottomGrid">
         <div className="panel">
-          <div className="panelHead"><h3>Technical Indicators</h3><span>Live</span></div>
+          <div className="panelHead"><h3>Technical Indicators</h3><span>{market?.status || "Unavailable"}</span></div>
           <div className="indicatorCards">
             <Indicator title="RSI (14)" value={signal?.rsi ?? "—"} sub="Neutral zone" />
             <Indicator title="MACD" value={signal?.macd ?? "—"} sub="Momentum" />
@@ -1313,9 +1365,7 @@ function Dashboard({markets, symbol, setSymbol, market, signal, chartInterval, s
         </div>
         <div className="panel activity">
           <div className="panelHead"><h3>Recent Signals</h3><button className="linkButton" onClick={onViewAll}>View all</button></div>
-          <div className="signalLine"><i className="buy">BUY</i><b>NIFTY 50</b><span>09:42 AM</span><strong>₹25,842</strong></div>
-          <div className="signalLine"><i className="sell">SELL</i><b>BTC/USDT</b><span>09:18 AM</span><strong>$112,640</strong></div>
-          <div className="signalLine"><i className="hold">HOLD</i><b>BANK NIFTY</b><span>08:57 AM</span><strong>₹58,320</strong></div>
+          {signal ? <div className="signalLine"><b>{symbol}</b><span>{signal.signal}</span><time>{signal.signal_time}</time><strong>{formatMarketPrice(symbol, signal.reference_price)}</strong></div> : <p>No verified signal loaded.</p>}
         </div>
       </div>
     </>
@@ -1468,12 +1518,12 @@ function Signals({symbol, setSymbol, signal, markets, market, notifyTelegram, ad
         <div>
           <span className="eyebrow">CURRENT SIGNAL</span>
           <div className={"heroSignal " + (signal?.signal || "HOLD").toLowerCase()}>{signal?.signal || "WAIT"}</div>
-          <p>Confidence score: <b>{signal?.confidence || 0}%</b></p>
+          <p>Strategy: <b>{signal?.strategy || "Waiting"}</b></p>
         </div>
         <div className="featureList">
-          <Row name="Signal date" value={formatTradeDate()} status="Trade date" />
-          <Row name="RSI (14)" value={signal?.rsi ?? "—"} status="Calculated" />
-          <Row name="MACD" value={signal?.macd ?? "—"} status="Calculated" />
+          <Row name="Signal candle" value={signal?.signal_time || "—"} status="Completed candle" />
+          <Row name="RSI (14)" value={signal?.rsi ?? "—"} status="Completed candle" />
+          <Row name="MACD" value={signal?.macd ?? "—"} status="Completed candle" />
           <Row name="Entry" value={plan.entry} status={plan.bias} />
           <Row name="Exit" value={plan.exit} status="Target" />
           <Row name="Stop Loss" value={plan.stopLoss} status="Risk" />
@@ -1491,7 +1541,7 @@ function Signals({symbol, setSymbol, signal, markets, market, notifyTelegram, ad
   );
 }
 
-function OptionsTrading({symbol, setSymbol, signal, markets, market, addLog}){
+function OptionsTrading({strategy, symbol, setSymbol, signal, markets, market, addLog}){
   const underlyings = ["NIFTY 50", "BANK NIFTY", "SENSEX"];
   const [expiry, setExpiry] = useState(() => nextOptionsExpiry(7));
   const [optionType, setOptionType] = useState("CALL");
@@ -1523,20 +1573,24 @@ function OptionsTrading({symbol, setSymbol, signal, markets, market, addLog}){
   const selectedMarket = symbol === underlying ? market : (markets || []).find((item) => item.symbol === underlying);
   const spot = Number(selectedMarket?.price || 0);
   const strikeStep = underlying === "NIFTY 50" ? 50 : 100;
-  const atmStrike = spot ? Math.round(spot / strikeStep) * strikeStep : strikeStep;
-  const strikes = Array.from({length: 11}, (_, index) => atmStrike + (index - 5) * strikeStep);
+  const atmStrike = spot > 0 ? Math.round(spot / strikeStep) * strikeStep : 0;
+  const strikes = spot > 0 ? Array.from({length: 11}, (_, index) => atmStrike + (index - 5) * strikeStep).filter((value) => value > 0) : [];
   const selectedStrike = strikes.includes(Number(strike)) ? Number(strike) : atmStrike;
   const expiryDate = new Date(`${expiry}T00:00:00`);
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const daysToExpiry = Math.max(1, Math.ceil((expiryDate.getTime() - today.getTime()) / 86400000));
   const selectedPremium = estimateOptionPremium(spot, selectedStrike, daysToExpiry, optionType);
-  const signalKey = [underlying, tradeType, liveOptionSignal?.signal, liveOptionSignal?.contract].join("|");
+  const signalKey = liveOptionSignal?.signal_id || [underlying, tradeType].join("|");
   const [signalMetadata, setSignalMetadata] = useState(() => createOptionsSignalMetadata(signalKey));
 
   useEffect(() => {
     let cancelled = false;
+    setLiveOptionSignal(null);
+    let pending = false;
     async function loadLiveSignal(){
+      if (pending) return;
+      pending = true;
       setLiveOptionLoading(true);
       setLiveOptionError("");
       try {
@@ -1544,14 +1598,16 @@ function OptionsTrading({symbol, setSymbol, signal, markets, market, addLog}){
         if (!savedSession?.accessToken) throw new Error("Sign in to request a live Angel One options signal.");
         const params = new URLSearchParams({trade_type: tradeType});
         const response = await fetch(`${API}/options/signal/${encodeURIComponent(underlying)}?${params}`, {
-          headers: {Authorization: `Bearer ${savedSession.accessToken}`}
+          method: "POST", body: JSON.stringify(strategyConfig(strategy)),
+          headers: {Authorization: `Bearer ${savedSession.accessToken}`, "Content-Type": "application/json"}
         });
         const result = await response.json();
-        if (!response.ok) throw new Error(result.detail || "Unable to load a live options signal.");
+        if (!response.ok) throw new Error(typeof result.detail === "string" ? result.detail : "Invalid strategy configuration.");
         if (!cancelled) setLiveOptionSignal(result);
       } catch (error) {
-        if (!cancelled) setLiveOptionError(error.message || "Unable to load a live options signal.");
+        if (!cancelled) { setLiveOptionSignal(null); setLiveOptionError(error.message || "Unable to load a live options signal."); }
       } finally {
+        pending = false;
         if (!cancelled) setLiveOptionLoading(false);
       }
     }
@@ -1561,7 +1617,7 @@ function OptionsTrading({symbol, setSymbol, signal, markets, market, addLog}){
       cancelled = true;
       clearInterval(timer);
     };
-  }, [underlying, tradeType]);
+  }, [underlying, tradeType, strategy]);
 
   useEffect(() => {
     if (symbol !== underlying) setSymbol(underlying);
@@ -1683,6 +1739,7 @@ function OptionsTrading({symbol, setSymbol, signal, markets, market, addLog}){
             <span>Strike step <b>{toCurrency(strikeStep)}</b></span>
             <span>Pricing basis <b>20% assumed volatility</b></span>
           </div>
+          {!spot && <p>Underlying market data unavailable. Simulator prices are not calculated.</p>}
           <div className="optionChainScroll">
             <table className="optionChainTable">
               <thead><tr><th>Call premium</th><th>Call</th><th>Strike</th><th>Put</th><th>Put premium</th></tr></thead>
@@ -1729,7 +1786,7 @@ function OptionsTrading({symbol, setSymbol, signal, markets, market, addLog}){
             <div className="optionSignalMeta">
               <span>Signal date <b>{liveOptionSignal?.signal_date || signalMetadata.date}</b></span>
               <span>Trade No. <b>{signalMetadata.tradeNumber}</b></span>
-              {liveOptionSignal?.confidence !== undefined && <span>Confidence <b>{liveOptionSignal.confidence}%</b></span>}
+              {liveOptionSignal && <span>Strategy <b>{liveOptionSignal.strategy}</b></span>}
             </div>
             <div className="optionSignalControls">
               <label>Trade type
@@ -1747,16 +1804,16 @@ function OptionsTrading({symbol, setSymbol, signal, markets, market, addLog}){
             ) : liveOptionSignal?.contract ? (
               <dl className="optionSignalDetails">
                 <div><dt>Signal</dt><dd>{liveOptionSignal.signal} · {liveOptionSignal.underlying}</dd></div>
-                <div><dt>Exact option contract</dt><dd>{liveOptionSignal.contract}</dd></div>
+                <div><dt>Setup status</dt><dd>{liveOptionSignal.setup_status}</dd></div><div><dt>Exact option contract</dt><dd>{liveOptionSignal.contract}</dd></div>
                 <div><dt>Expiry</dt><dd>{liveOptionSignal.expiry}</dd></div>
                 <div><dt>Trade type / action</dt><dd>{liveOptionSignal.trade_type} · {liveOptionSignal.action} {liveOptionSignal.option_type}</dd></div>
-                <div><dt>Live entry premium</dt><dd>{toCurrency(liveOptionSignal.entry_premium)}</dd></div>
-                <div><dt>Target premium</dt><dd>{toCurrency(liveOptionSignal.target_premium)}</dd></div>
+                <div><dt>Premium when setup was detected</dt><dd>{toCurrency(liveOptionSignal.entry_premium)}</dd></div>
+                <div><dt>Current quoted premium</dt><dd>{toCurrency(liveOptionSignal.current_premium ?? liveOptionSignal.entry_premium)}</dd></div><div><dt>Target scenario</dt><dd>{toCurrency(liveOptionSignal.target_premium)}</dd></div>
                 <div><dt>Stop-loss premium</dt><dd>{toCurrency(liveOptionSignal.stop_loss_premium)}</dd></div>
                 <div><dt>Underlying spot</dt><dd>{toCurrency(liveOptionSignal.spot)}</dd></div>
               </dl>
             ) : liveOptionSignal ? (
-              <p>No directional options setup right now. Current {liveOptionSignal.underlying} signal: {liveOptionSignal.signal} ({liveOptionSignal.confidence}% confidence).</p>
+              <p>No directional options setup right now. Current {liveOptionSignal.underlying} signal: {liveOptionSignal.signal} · {liveOptionSignal.reason}.</p>
             ) : <p>Waiting for a live signal.</p>}
             <small>{liveOptionSignal?.note || "Signal, expiry, and option premium require configured Angel One SmartAPI credentials. Target/stop levels are percentage scenarios, not guaranteed fills or investment advice."}</small>
           </div>
@@ -1780,9 +1837,9 @@ function OptionsTrading({symbol, setSymbol, signal, markets, market, addLog}){
   );
 }
 
-function Backtesting({backtest, runBacktest, symbol, backtestForm, setBacktestForm, notifyTelegram, addLog}){
+function Backtesting({strategies, error, running, backtest, runBacktest, symbol, backtestForm, setBacktestForm, notifyTelegram, addLog}){
   const chartData = useMemo(() => {
-    const labels = (backtest?.equity_curve || []).map((_, index) => `T${index + 1}`);
+    const labels = backtest?.equity_times || [];
     const values = backtest?.equity_curve || [];
     return {
       labels,
@@ -1792,11 +1849,11 @@ function Backtesting({backtest, runBacktest, symbol, backtestForm, setBacktestFo
 
   return (
     <>
-      <div className="pageHead"><div><p className="eyebrow">STRATEGY LAB</p><h1>Backtesting</h1><p>Evaluate historical strategy performance.</p></div><button className="primary" onClick={() => { runBacktest(); notifyTelegram(`Backtest started for ${backtestForm.symbol} using ${backtestForm.strategy}.`); }}>Run {symbol} Test</button></div>
+      <div className="pageHead"><div><p className="eyebrow">STRATEGY LAB</p><h1>Backtesting</h1><p>Evaluate historical strategy performance.</p></div><button className="primary" disabled={running} onClick={runBacktest}>{running ? "Running…" : `Run ${backtestForm.symbol} Test`}</button></div>
       <div className="panel backtestFormPanel">
         <div className="formGrid">
           <label>Market symbol<select value={backtestForm.symbol} onChange={(event) => setBacktestForm((current) => ({...current, symbol: event.target.value}))}><option>NIFTY 50</option><option>BANK NIFTY</option><option>SENSEX</option><option>RELIANCE</option><option>TCS</option><option>INFOSYS</option><option>HDFC BANK</option><option>ICICI BANK</option><option>SBIN</option><option>ITC</option><option>BHARTI AIRTEL</option><option>BTC/USDT</option><option>ETH/USDT</option></select></label>
-          <label>Strategy<select value={backtestForm.strategy} onChange={(event) => setBacktestForm((current) => ({...current, strategy: event.target.value}))}><option>AI Momentum</option><option>RSI Reversal</option><option>Breakout Momentum</option><option>VWAP Trend</option><option>Mean Reversion</option><option>Swing Breakout</option></select></label>
+          <label>Strategy<select value={backtestForm.strategy} onChange={(event) => setBacktestForm((current) => ({...current, strategy: event.target.value}))}>{strategies.map((item) => <option key={item.name}>{item.name}</option>)}</select></label>
           <label>Timeframe<select value={backtestForm.timeframe} onChange={(event) => setBacktestForm((current) => {
             const timeframe = event.target.value;
             const durationUnit = maxDurationForUnit(timeframe, current.durationUnit) ? current.durationUnit : "days";
@@ -1807,19 +1864,23 @@ function Backtesting({backtest, runBacktest, symbol, backtestForm, setBacktestFo
           </select></label>
           <label>Duration<div className="durationInputGroup"><input aria-label="Duration amount" type="number" min="1" max={maxDurationForUnit(backtestForm.timeframe, backtestForm.durationUnit)} step="1" required value={backtestForm.durationValue} onChange={(event) => setBacktestForm((current) => ({...current, durationValue: event.target.value}))} /><select aria-label="Duration unit" value={backtestForm.durationUnit} onChange={(event) => setBacktestForm((current) => ({...current, durationUnit: event.target.value, durationValue: "1"}))}><option value="days">Days</option><option value="months" disabled={!maxDurationForUnit(backtestForm.timeframe, "months")}>Months</option><option value="years" disabled={!maxDurationForUnit(backtestForm.timeframe, "years")}>Years</option></select></div></label>
           <label>Initial capital<input type="number" value={backtestForm.initialCapital} onChange={(event) => setBacktestForm((current) => ({...current, initialCapital: event.target.value}))} /></label>
-          <label>Position size<input type="number" value={backtestForm.positionSize} onChange={(event) => setBacktestForm((current) => ({...current, positionSize: event.target.value}))} /></label>
+          <label>Allocation per trade (currency)<input type="number" value={backtestForm.positionSize} onChange={(event) => setBacktestForm((current) => ({...current, positionSize: event.target.value}))} /></label>
           <label>Stop loss %<input type="number" min="0" step="0.1" value={backtestForm.stopLoss} onChange={(event) => setBacktestForm((current) => ({...current, stopLoss: event.target.value}))} /></label>
+          <label>Fee (bps per side)<input type="number" min="0" max="100" value={backtestForm.feeBps} onChange={(event) => setBacktestForm((current) => ({...current, feeBps: event.target.value}))} /></label>
+          <label>Slippage (bps per side)<input type="number" min="0" max="100" value={backtestForm.slippageBps} onChange={(event) => setBacktestForm((current) => ({...current, slippageBps: event.target.value}))} /></label>
         </div>
       </div>
+      {error && <p role="alert">{error}</p>}
       {backtest ? (
         <>
+          <p>{backtest.data_source} · {backtest.actual_start} to {backtest.actual_end}. {backtest.assumptions}</p>
           <div className="grid4">
-            <Stat title="Final Value" value={toCurrency(backtest.final_value)} delta={formatPercent(backtest.return_pct)} icon="₹" />
-            <Stat title="P&L" value={toCurrency(backtest.pnl)} delta="Test result" icon="↗" />
+            <Stat title="Final Value" value={formatMarketPrice(backtest.symbol, backtest.final_value)} delta={formatPercent(backtest.return_pct)} icon="₹" />
+            <Stat title="P&L" value={formatMarketPrice(backtest.symbol, backtest.pnl)} delta="Test result" icon="↗" />
             <Stat title="Win Rate" value={`${backtest.win_rate || 0}%`} delta={`${backtest.trades || 0} trades`} icon="W" />
             <Stat title="Max Drawdown" value={`${backtest.max_drawdown || 0}%`} delta="Risk metric" icon="↓" />
           </div>
-          <div className="panel chartPanel"><div className="panelHead"><h3>{backtestForm.symbol} performance</h3><span>{backtestForm.strategy} · {backtestForm.durationValue} {backtestForm.durationUnit} · {chartData.datasets[0].data.length} equity points</span></div><div className="chart"><Line data={chartData} options={{responsive: true, maintainAspectRatio: false, interaction: {mode: "index", intersect: false}, plugins: {legend: {display: false}, tooltip: {enabled: true}}, scales: {x: {grid: {display: false}, ticks: {color: "#8190a5", autoSkip: true, maxTicksLimit: 8}}, y: {beginAtZero: false, grid: {color: "rgba(255,255,255,.05)"}, ticks: {color: "#8190a5", callback: (value) => toCurrency(Number(value))}}}}} /></div></div>
+          <div className="panel chartPanel"><div className="panelHead"><h3>{backtest.symbol} performance</h3><span>{backtest.strategy} · {backtest.duration} {backtest.duration_unit} · {chartData.datasets[0].data.length} equity points</span></div><div className="chart"><Line data={chartData} options={{responsive: true, maintainAspectRatio: false, interaction: {mode: "index", intersect: false}, plugins: {legend: {display: false}, tooltip: {enabled: true}}, scales: {x: {grid: {display: false}, ticks: {color: "#8190a5", autoSkip: true, maxTicksLimit: 8}}, y: {beginAtZero: false, grid: {color: "rgba(255,255,255,.05)"}, ticks: {color: "#8190a5", callback: (value) => formatMarketPrice(backtest.symbol, Number(value))}}}}} /></div></div>
         </>
       ) : <div className="empty panel">Run a backtest to calculate P&L, win rate and maximum drawdown.</div>}
     </>
@@ -1861,17 +1922,16 @@ function Risk({riskRules, setRiskRules, saveRiskRules, addLog}){
   );
 }
 
-function Reports({exportReport, exportMessage, notifyTelegram}){
-  return (
-    <>
-      <div className="pageHead"><div><p className="eyebrow">ANALYTICS</p><h1>Reports</h1><p>Backtesting and strategy performance reports.</p></div></div>
-      <div className="panel table">
-        <div className="signalLine"><b>Weekly Strategy Report</b><span>AI Momentum</span><span>Generated today</span><button className="outline" onClick={() => { exportReport("Weekly Strategy Report", "AI Momentum", "This week"); notifyTelegram("Weekly strategy report exported from TradeMind."); }}>Export</button></div>
-        <div className="signalLine"><b>Monthly P&L Report</b><span>Portfolio</span><span>Sep 2026</span><button className="outline" onClick={() => { exportReport("Monthly P&L Report", "Portfolio", "Sep 2026"); notifyTelegram("Monthly P&L report exported from TradeMind."); }}>Export</button></div>
-        {exportMessage && <p role="status">{exportMessage}</p>}
-      </div>
-    </>
-  );
+function Reports({backtest, exportReport, exportMessage}){
+  return <><div className="pageHead"><h1>Reports</h1></div><div className="panel">
+    {backtest ? <><h3>{backtest.symbol} · {backtest.strategy}</h3>
+      <p>{backtest.actual_start} to {backtest.actual_end} · {backtest.data_source}</p>
+      <p>P&amp;L: {formatMarketPrice(backtest.symbol, backtest.pnl)} · Trades: {backtest.trades} · Drawdown: {backtest.max_drawdown}%</p>
+      <p>Historical underlying simulation. {backtest.assumptions}</p>
+      <button className="primary" onClick={exportReport}>Download results, trades and equity CSV</button></>
+      : <p>Complete a backtest to download its actual results. No report has been generated.</p>}
+    {exportMessage && <p role="status">{exportMessage}</p>}
+  </div></>;
 }
 
 function Strategies({strategies, addStrategy, configureStrategy, addLog}){
@@ -1880,10 +1940,17 @@ function Strategies({strategies, addStrategy, configureStrategy, addLog}){
   const [newError, setNewError] = useState("");
   const [editing, setEditing] = useState(null);
   const [editRisk, setEditRisk] = useState("Medium");
+  const [newConfig, setNewConfig] = useState(strategyConfig(defaultStrategies[0]));
+  const [editConfig, setEditConfig] = useState(strategyConfig(defaultStrategies[0]));
+  function valid(config){ return Number(config.fast) < Number(config.slow); }
+  function fields(config, setConfig){
+    return <><label>Rule template<select value={config.template} onChange={(event) => setConfig({...config, template: event.target.value})}>{Object.keys(strategyDescriptions).map((name) => <option key={name}>{name}</option>)}</select></label>
+      {[["fast", "Fast EMA", 2, 100], ["slow", "Slow EMA", 3, 200], ["lookback", "Channel / bands lookback", 5, 100], ["oversold", "RSI oversold", 5, 45], ["overbought", "RSI overbought", 55, 95], ["volume_multiplier", "Breakout volume multiplier", 0.1, 5]].map(([key, label, min, max]) => <label key={key}>{label}<input type="number" min={min} max={max} step={key === "volume_multiplier" ? "0.1" : "1"} required value={config[key]} onChange={(event) => setConfig({...config, [key]: Number(event.target.value)})} /></label>)}</>;
+  }
 
   function submitNewStrategy(event){
     event.preventDefault();
-    if (!addStrategy(newName)) { setNewError("Enter a unique strategy name."); return; }
+    if (!valid(newConfig) || !addStrategy(newName, newConfig)) { setNewError("Use a unique name and a fast EMA shorter than the slow EMA."); return; }
     addLog(`Created new strategy: ${newName.trim()}.`, "success");
     setNewName(""); setNewError(""); setShowNew(false);
   }
@@ -1891,11 +1958,13 @@ function Strategies({strategies, addStrategy, configureStrategy, addLog}){
   function openConfiguration(strategy){
     setEditing(strategy.name);
     setEditRisk(strategy.risk);
+    setEditConfig(strategyConfig(strategy));
   }
 
   function saveConfiguration(event, strategyName){
     event.preventDefault();
-    if (configureStrategy(strategyName, editRisk)) {
+    if (!valid(editConfig)) { setNewError("Fast EMA must be shorter than slow EMA."); return; }
+    if (configureStrategy(strategyName, editRisk, editConfig)) {
       addLog(`Updated ${strategyName} to ${editRisk} risk.`, "success");
       setEditing(null);
     }
@@ -1904,8 +1973,8 @@ function Strategies({strategies, addStrategy, configureStrategy, addLog}){
   return (
     <>
       <div className="pageHead"><div><p className="eyebrow">CONFIGURATION</p><h1>Trading Strategies</h1><p>Create and manage rule-based strategies.</p></div><button className="primary" onClick={() => { setShowNew(true); setNewError(""); }}>+ New Strategy</button></div>
-      {showNew && <form className="panel" onSubmit={submitNewStrategy}><label>Strategy name<input autoFocus maxLength="40" value={newName} onChange={(event) => { setNewName(event.target.value); setNewError(""); }} required /></label>{newError && <span role="alert">{newError}</span>}<button className="primary" type="submit">Create Strategy</button><button className="outline" type="button" onClick={() => setShowNew(false)}>Cancel</button></form>}
-      <div className="strategyGrid">{strategies.map((strategy) => <div className="panel strategy" key={strategy.name}><span className={`badge ${strategy.status === "READY" ? "muted" : ""}`}>{strategy.status}</span><h3>{strategy.name}</h3><p>{strategy.description}</p><Row name="Risk" value={strategy.risk} status={strategy.status === "ACTIVE" ? "Configured" : "Ready"} /><button className="outline" onClick={() => editing === strategy.name ? setEditing(null) : openConfiguration(strategy)}>{editing === strategy.name ? "Close configuration" : "Configure"}</button>{editing === strategy.name && <form onSubmit={(event) => saveConfiguration(event, strategy.name)}><label>Risk level<select value={editRisk} onChange={(event) => setEditRisk(event.target.value)}><option>Low</option><option>Medium</option><option>High</option></select></label><button className="primary" type="submit">Save configuration</button></form>}</div>)}</div>
+      {showNew && <form className="panel" onSubmit={submitNewStrategy}><label>Strategy name<input autoFocus maxLength="40" value={newName} onChange={(event) => { setNewName(event.target.value); setNewError(""); }} required /></label>{fields(newConfig, setNewConfig)}{newError && <span role="alert">{newError}</span>}<button className="primary" type="submit">Create Strategy</button><button className="outline" type="button" onClick={() => setShowNew(false)}>Cancel</button></form>}
+      <div className="strategyGrid">{strategies.map((strategy) => <div className="panel strategy" key={strategy.name}><span className={`badge ${strategy.status === "READY" ? "muted" : ""}`}>{strategy.status}</span><h3>{strategy.name}</h3><p>{strategy.description}</p><Row name="Risk" value={strategy.risk} status={strategy.status === "ACTIVE" ? "Configured" : "Ready"} /><button className="outline" onClick={() => editing === strategy.name ? setEditing(null) : openConfiguration(strategy)}>{editing === strategy.name ? "Close configuration" : "Configure"}</button>{editing === strategy.name && <form onSubmit={(event) => saveConfiguration(event, strategy.name)}>{fields(editConfig, setEditConfig)}{newError && <p role="alert">{newError}</p>}<label>Risk label (display only)<select value={editRisk} onChange={(event) => setEditRisk(event.target.value)}><option>Low</option><option>Medium</option><option>High</option></select></label><button className="primary" type="submit">Save configuration</button></form>}</div>)}</div>
     </>
   );
 }

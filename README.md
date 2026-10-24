@@ -3,7 +3,7 @@
 For questions or help with the dashboard, contact [fultonskipz44@gmail.com](mailto:fultonskipz44@gmail.com).
 
 ## Live market-data mode
-The dashboard now attempts to load current market data through Yahoo Finance using `yfinance` from the FastAPI backend. It refreshes automatically every 15 seconds.
+The dashboard polls every 15 seconds. With Angel One credentials, Indian indices and NSE equities use broker candles at supported intervals (1m, 5m, 15m, 30m, 60m/1h, 1d). The selected market also requests a broker FULL quote and checks its exchange timestamp. Other intervals and cryptocurrencies use Yahoo Finance and are explicitly labeled as potentially delayed. Polling is not a tick streaming feed.
 
 Supported symbols:
 - NIFTY 50 (`^NSEI`)
@@ -13,7 +13,7 @@ Supported symbols:
 - BTC/USDT (`BTC-USD`)
 - ETH/USDT (`ETH-USD`)
 
-**Important:** Yahoo Finance data availability and exchange delays depend on the instrument/exchange. The app visibly falls back to demo data if the provider is unavailable. This is not a guaranteed tick-by-tick feed.
+**Data integrity:** Unavailable history returns an error; generated prices are never substituted. Yahoo data is never labeled real time. Provider, candle time, fetch time and freshness are exposed by the API, and the UI shows the source and candle time. Stale data cannot generate a new entry. An unavailable broker quote is labeled separately from historical candle availability. Broker credentials and exchange entitlements are required for live Indian data.
 
 The dashboard chart supports line, area, candlestick, and OHLC views; 1-minute through monthly intervals; 1D-to-1Y range shortcuts; linear, logarithmic, and percentage price scales; volume, SMA (20), EMA (20), and Bollinger overlays; horizontal and trend-line drawings; watchlist selection; and price-crossing alerts. Replay steps through the loaded candles, and chart data can be exported as CSV. Save stores chart settings in the browser. Quotes and candles are sourced through Yahoo Finance and may be delayed or unavailable. For exchange-authoritative real-time quotes, connect an authorized broker or exchange market-data feed.
 
@@ -26,18 +26,55 @@ ANGELONE_PASSWORD=your-password-or-pin
 ANGELONE_TOTP_SECRET=your-totp-secret
 ```
 
-The backend loads this file automatically on startup. It is excluded from version control; keep credentials out of frontend code and never commit or share them. Restart the backend after editing it. Docker Compose also reads this file. Without credentials or if Angel One is unavailable, the live signal panel shows the provider error and does not substitute demo values. The separate options-chain display and paper-order form remain theoretical simulators and are not used for live signal prices. Signal direction is a rule-based estimate, and target/stop prices are scenarios—not guaranteed fills or investment advice. Paper-order confirmations are stored in the browser only; no broker order execution is connected.
+The backend loads this file automatically on startup. It is excluded from version control; keep credentials out of frontend code and never commit or share them. Restart the backend after editing it. Docker Compose also reads this file. Without credentials or if Angel One is unavailable, the live signal panel shows the provider error and does not substitute demo values. The separate options-chain display and paper-order form remain theoretical simulators and are not used for live signal prices. Signal direction uses the selected strategy on completed five minute broker candles. FULL quotes must include an exchange timestamp no older than 120 seconds. The contract and entry/target/stop snapshot stay fixed within that completed candle in the current backend process, while current premium is refreshed separately. These snapshots are not durable trade records: multiple workers or a restart can observe different first premiums. Target/stop crossings are observations, not fills. Overnight trade types exclude contracts expiring today. Signal direction is a rule based estimate, and percentage target/stop prices are scenarios, not guaranteed fills or investment advice. Paper-order confirmations are stored in the browser only; no broker order execution is connected.
 
-Backtesting supports Yahoo Finance intervals from 1 minute through 3 months (1m, 2m, 5m, 15m, 30m, 60m, 90m, 1h, 1d, 5d, 1wk, 1mo, and 3mo), plus a duration amount selectable in days, months, or years. Yahoo limits how far intraday intervals reach into history: 1-minute uses up to 7 days and other intraday intervals use up to 60 days. Daily intervals support up to 5 years, and weekly/monthly intervals up to 10 years. Duration units that exceed a timeframe's available history are disabled. Actual availability depends on the instrument and Yahoo Finance; unavailable history uses generated demo data.
+Backtesting supports Yahoo Finance intervals from 1 minute through 3 months (1m, 2m, 5m, 15m, 30m, 60m, 90m, 1h, 1d, 5d, 1wk, 1mo, and 3mo), plus a duration amount selectable in days, months, or years. Yahoo limits how far intraday intervals reach into history: 1-minute uses up to 7 days and other intraday intervals use up to 60 days. Daily intervals support up to 5 years, and weekly/monthly intervals up to 10 years. Duration units that exceed a timeframe's available history are disabled. These limits are request limits, not a promise of history coverage. Actual availability depends on the instrument and provider; unavailable history produces an error. Broker requests are bounded by interval (30 days for 1m, 60 days for other intraday, 90 days for hourly, 2000 days for daily). The API and report include requested start, available history start and actual tested start/end, so shorter provider coverage is visible.
+
+## Strategies, signals and backtests
+
+Five executable templates are available. No template is presented as proven profitable in 2026; validate your instrument, timeframe, costs and out of sample results.
+
+| Template | BUY rule | SELL / long exit rule |
+| --- | --- | --- |
+| EMA Trend | Fast EMA above slow EMA; RSI 50–70 | Fast EMA below slow EMA; RSI 30–50 |
+| RSI Reversal | RSI crosses above configured oversold level | RSI crosses below configured overbought level |
+| Breakout Momentum | Close above previous channel high with volume confirmation | Close below previous channel low with volume confirmation |
+| VWAP Trend | Close above session VWAP approximation and fast EMA above slow | Close below session VWAP approximation and fast EMA below slow |
+| Mean Reversion | Close crosses back above lower Bollinger band | Close crosses back below upper Bollinger band |
+
+VWAP uses candle typical price times volume, grouped by Asia/Kolkata calendar date; it is an approximation for intraday analysis. Daily and longer VWAP requests are rejected. Index feeds often have zero volume, so VWAP and volume breakouts return HOLD instead of inventing volume. EMA defaults: 12/26. RSI period: 14, thresholds: 30/70. Channel and Bollinger defaults: 20 candles, bands: two population standard deviations. Breakout volume compares against the previous channel's mean volume. Warmup requires the largest of slow EMA, lookback and 15 candles. HOLD means no new directional condition; a historical long remains open until SELL, stop, or test end.
+
+Custom strategies are saved in this browser as a name, one of these templates and executable parameters. They appear in both selectors and can drive signals, options direction and backtests. Arbitrary uploaded code and custom rule languages are not supported. Risk labels are descriptive only; actual allocation, stop and estimated costs are set in Backtesting.
+
+Signals use the last completed candle and include a stable identifier and candle timestamp. Unfinished candles are excluded. There is no calibrated confidence probability. A strategy can change at the next completed candle. Indicators use the same causal rule engine as backtesting. Chart indicators can include the currently forming candle; the signal panel explicitly identifies its completed candle.
+
+Backtests simulate **long underlying units**, not option premiums, short sales or actual portfolio returns. SELL exits the long; it does not open a short. Index units are hypothetical because the cash index cannot be directly purchased. Decisions use closed candles, execute at the next open, use whole units within the specified cash allocation and deduct fees/slippage per side (defaults: 10/5 bps). Stops are checked against candle lows, with adverse gaps filled at the open plus slippage. Final open positions are liquidated with costs and counted. All equity points and trades are returned. Report CSVs contain the actual result snapshot, inputs, source, assumptions, full trade ledger and equity timestamps; changing form fields does not relabel a completed result. These reports are simulations, not broker statements or tax reports.
+
+API compatibility: GET `/api/signal/{symbol}` defaults to EMA Trend; POST accepts a `StrategyConfig` JSON object. POST `/api/backtest` accepts the same optional body and query parameters `strategy`, `position_size` (cash allocation), `stop_loss`, `fee_bps`, `slippage_bps`. Old `AI Momentum` and `Swing Breakout` strategy names resolve to EMA Trend and Breakout Momentum. POST `/api/options/signal/{underlying}` accepts the config with the same authentication as GET. `/api/strategies` lists defaults. Invalid configs and unsupported symbols return 422; missing provider data returns 502/503. Synthetic fallback and fabricated confidence values have been removed.
+
+### Tests
+
+From `backend`, with requirements and `httpx` installed:
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+From `frontend`:
+
+```bash
+npm ci
+npm run build
+```
 
 ## Run
 ### Backend
 ```bash
 cd backend
 python -m venv venv
-venv\Scripts\activate
+source venv/bin/activate  # Windows: venv\Scripts\activate
 pip install -r requirements.txt
-uvicorn main:app --reload
+uvicorn main:app --reload --port 8001
 ```
 
 ### Frontend

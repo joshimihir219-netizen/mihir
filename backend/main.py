@@ -12,7 +12,7 @@ import sqlite3
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from fastapi import FastAPI, Header, HTTPException, Query
+from fastapi import Body, FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 import pandas as pd
 import psycopg
@@ -22,7 +22,9 @@ from pydantic import BaseModel, Field
 from ml_engine import generate_signal
 from backtest import run_backtest
 from market_data import TIMEFRAME_HISTORY, market_frame, _duration_offset, _max_duration
-from angel_options import get_live_option_signal
+from angel_options import get_live_option_signal, broker_quote
+from strategies import STRATEGIES, StrategyConfig, resolve_strategy
+from market_data import completed_candles, data_metadata
 
 app = FastAPI(title="AI Trading Dashboard API", version="2.0.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
@@ -322,10 +324,14 @@ def health():
 def markets():
     result = []
     for symbol in SYMBOLS:
-        df, live = market_frame(symbol, 80, live=True)
+        try:
+            df, live = market_frame(symbol, 80, live=True)
+        except HTTPException as error:
+            result.append({"symbol": symbol, "price": None, "change": None, "live": False, "status": "unavailable", "error": error.detail})
+            continue
         price = float(df.close.iloc[-1])
         prev = float(df.close.iloc[-2]) if len(df) > 1 else price
-        result.append({"symbol": symbol, "price": round(price, 4), "change": round((price / prev - 1) * 100, 2), "live": live})
+        result.append({"symbol": symbol, "price": round(price, 4), "change": round((price / prev - 1) * 100, 2), **data_metadata(df, "5m")})
     return result
 
 @app.get("/api/market/{symbol:path}")
@@ -334,62 +340,136 @@ def market(
     interval: str = Query("5m", pattern="^(1m|2m|5m|15m|30m|60m|90m|1h|1d|5d|1wk|1mo|3mo)$"),
 ):
     df, live = market_frame(symbol, 500, live=True, interval=interval)
+    quote_error = None
     price = float(df.close.iloc[-1])
+    if df.attrs.get("broker"):
+        try:
+            price = broker_quote(symbol)
+        except HTTPException as error:
+            quote_error = error.detail
     prev = float(df.close.iloc[-2]) if len(df) > 1 else price
     return {
         "symbol": symbol,
+        "quote_status": "unavailable" if quote_error else "broker_quote" if df.attrs.get("broker") else "candle_close",
+        "quote_error": quote_error,
         "timeframe": interval,
         "price": price,
         "change": (price / prev - 1) * 100,
-        "live": live,
+        **{**data_metadata(df, interval), "live": live and not bool(quote_error)},
         "updated_at": pd.Timestamp(df.time.iloc[-1]).isoformat(),
         "series": [{"time": pd.Timestamp(x).strftime("%d %b %H:%M"), "timestamp": pd.Timestamp(x).isoformat(), "open": float(o), "high": float(h), "low": float(l), "close": float(c), "volume": float(v), "sma20": float(sma) if pd.notna(sma) else None} for x,o,h,l,c,v,sma in zip(df.time,df.open,df.high,df.low,df.close,df.volume,df.sma20)],
-        "indicators": {"rsi": round(float(df.rsi.iloc[-1]), 2), "macd": round(float(df.macd.iloc[-1]), 4), "sma20": round(float(df.sma20.iloc[-1]), 2)},
+        "indicators": {"rsi": round(float(df.rsi.iloc[-1]), 2), "macd": round(float(df.macd.iloc[-1]), 4), "sma20": round(float(df.sma20.iloc[-1]), 2) if pd.notna(df.sma20.iloc[-1]) else None},
     }
 
+@app.get("/api/strategies")
+def strategy_catalog():
+    return [{**StrategyConfig(name=name, template=name).model_dump(), "description": description}
+            for name, description in STRATEGIES.items()]
+
+
+def _strategy_config(strategy, config):
+    try:
+        return resolve_strategy(strategy, config)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+def _validate_strategy_interval(config, interval):
+    if config.template == "VWAP Trend" and interval in {"1d", "5d", "1wk", "1mo", "3mo"}:
+        raise HTTPException(status_code=422, detail="VWAP Trend requires intraday candles. Select an intraday timeframe.")
+
+
+def _signal_result(symbol, interval, strategy, config):
+    config = _strategy_config(strategy, config)
+    _validate_strategy_interval(config, interval)
+    df, _ = market_frame(symbol, 500, interval=interval)
+    metadata = data_metadata(df, interval)
+    closed = completed_candles(df, interval)
+    if closed.empty:
+        raise HTTPException(status_code=502, detail="No completed candles available.")
+    result = generate_signal(closed, config=config)
+    metadata["stale"] = metadata["stale"] or data_metadata(closed, interval, closed=True)["stale"]
+    metadata["live"] = metadata["live"] and not metadata["stale"]
+    if metadata["stale"]:
+        result.update(signal="HOLD", reason="Market data is stale or market is closed; no new entry.")
+    return {"symbol": symbol, "timeframe": interval, **metadata, **result,
+            "signal_id": f"{symbol}|{interval}|{config.model_dump_json()}|{result['signal_time']}"}
+
+
 @app.get("/api/signal/{symbol:path}")
-def signal(symbol: str):
-    df, live = market_frame(symbol, 80, live=True)
-    result = generate_signal(df)
-    return {"symbol": symbol, "live": live, **result}
+def signal(symbol: str, interval: str = "5m", strategy: str = "EMA Trend"):
+    if interval not in TIMEFRAME_HISTORY:
+        raise HTTPException(status_code=422, detail="Unsupported signal interval.")
+    return _signal_result(symbol, interval, strategy, None)
+
+
+@app.post("/api/signal/{symbol:path}")
+def configured_signal(symbol: str, config: StrategyConfig, interval: str = "5m"):
+    if interval not in TIMEFRAME_HISTORY:
+        raise HTTPException(status_code=422, detail="Unsupported signal interval.")
+    return _signal_result(symbol, interval, config.name, config)
+
 
 @app.get("/api/options/signal/{underlying}")
 def options_signal(
     underlying: str,
     trade_type: str = Query("INTRADAY", pattern="^(INTRADAY|BTST|STBT)$"),
     authorization: str | None = Header(default=None),
+    strategy: str = "EMA Trend",
 ):
     current_user(authorization)
-    return get_live_option_signal(underlying.upper(), trade_type)
+    return get_live_option_signal(underlying.upper(), trade_type, config=_strategy_config(strategy, None))
+
+
+@app.post("/api/options/signal/{underlying}")
+def configured_options_signal(underlying: str, config: StrategyConfig,
+                              trade_type: str = Query("INTRADAY", pattern="^(INTRADAY|BTST|STBT)$"),
+                              authorization: str | None = Header(default=None)):
+    current_user(authorization)
+    return get_live_option_signal(underlying.upper(), trade_type, config=config)
+
 
 @app.post("/api/backtest")
 def backtest(
     symbol: str = Query("NIFTY 50"),
-    initial_capital: float = Query(100000, gt=0),
+    initial_capital: float = Query(100000, gt=0, allow_inf_nan=False),
     timeframe: str = Query("1d", pattern="^(1m|2m|5m|15m|30m|60m|90m|1h|1d|5d|1wk|1mo|3mo)$"),
     duration: int = Query(30, ge=1, le=3650),
     duration_unit: str = Query("days", pattern="^(days|months|years)$"),
+    strategy: str = "EMA Trend",
+    position_size: float = Query(1000, gt=0, allow_inf_nan=False),
+    stop_loss: float = Query(1.5, gt=0, lt=100, allow_inf_nan=False),
+    fee_bps: float = Query(10, ge=0, le=100, allow_inf_nan=False),
+    slippage_bps: float = Query(5, ge=0, le=100, allow_inf_nan=False),
+    config: StrategyConfig | None = Body(default=None),
 ):
+    config = _strategy_config(strategy, config)
+    _validate_strategy_interval(config, timeframe)
     max_duration = _max_duration(timeframe, duration_unit)
     if duration > max_duration:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Duration cannot exceed {max_duration} {duration_unit} for {timeframe} timeframe.",
-        )
-    df, live = market_frame(symbol, 6000, live=True, interval=timeframe)
+        raise HTTPException(status_code=422, detail=f"Duration cannot exceed {max_duration} {duration_unit} for {timeframe} timeframe.")
+    # Keep all available history for indicator warmup; apply the test boundary after indicators.
+    df, _ = market_frame(symbol, 200000, interval=timeframe)
+    df = completed_candles(df, timeframe)
     cutoff = pd.Timestamp.now(tz="UTC") - _duration_offset(duration, duration_unit)
-    timestamps = pd.to_datetime(df["time"], utc=True)
-    df = df.loc[timestamps >= cutoff].reset_index(drop=True)
-    if df.empty:
-        raise HTTPException(status_code=502, detail="No market data is available for the selected backtest period.")
-    return {
-        **run_backtest(df, initial_capital),
-        "timeframe": timeframe,
-        "duration": duration,
-        "duration_unit": duration_unit,
-        "history_period": TIMEFRAME_HISTORY[timeframe],
-        "data_source": "live provider" if live else "demo fallback",
-    }
+    if df.empty or not (pd.to_datetime(df.time, utc=True) >= cutoff).any():
+        raise HTTPException(status_code=502, detail="No completed history in the requested period.")
+    warmup = max(config.slow, config.lookback, 15)
+    if len(df) <= warmup or not (pd.to_datetime(df.time.iloc[warmup:], utc=True) >= cutoff).any():
+        raise HTTPException(status_code=422, detail=f"Insufficient completed history: at least {warmup + 1} candles are required including warmup.")
+    try:
+        result = run_backtest(df, initial_capital, config=config, position_size=position_size,
+                              stop_loss=stop_loss, fee_bps=fee_bps, slippage_bps=slippage_bps, start_time=cutoff)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    return {**result, "symbol": symbol, "timeframe": timeframe, "duration": duration,
+            "duration_unit": duration_unit, "history_period": TIMEFRAME_HISTORY[timeframe],
+            "currency": "USD" if symbol.endswith("/USDT") else "INR",
+            "data_source": df.attrs.get("data_source"), "generated_at": pd.Timestamp.now(tz="UTC").isoformat(),
+            "requested_start": cutoff.isoformat(),
+            "history_start": pd.Timestamp(df.time.iloc[0]).isoformat(),
+            "warmup_bars": max(config.slow, config.lookback, 15),
+            "available_bars": len(df)}
 
 @app.get("/api/risk")
 def risk():

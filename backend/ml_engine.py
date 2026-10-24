@@ -1,32 +1,27 @@
-import numpy as np
+"""Rule based signals; no fitted model or probability claims."""
+from strategies import resolve_strategy, strategy_frame
 
-def generate_signal(df):
-    latest = df.iloc[-1]
-    rsi = float(latest["rsi"])
-    macd = float(latest["macd"])
-    macd_signal = float(latest["signal_line"])
-    sma = float(latest["sma20"])
-    close = float(latest["close"])
 
-    score = 0
-    if close > sma: score += 1
-    if macd > macd_signal: score += 1
-    if rsi < 70: score += 1
-    if rsi < 35: score += 1
-
-    if score >= 3:
-        signal = "BUY"
-    elif score <= 1:
-        signal = "SELL"
-    else:
-        signal = "HOLD"
-
-    confidence = min(96, 60 + abs(score - 2) * 11 + int(np.random.default_rng(7).integers(0, 8)))
+def generate_signal(df, strategy="EMA Trend", config=None):
+    config = resolve_strategy(strategy, config)
+    frame = strategy_frame(df, config)
+    if frame.empty:
+        raise ValueError("No completed candles are available.")
+    latest = frame.iloc[-1]
+    direction = latest.direction
+    ready = bool(latest.ready)
+    volume_missing = config.template in {"VWAP Trend", "Breakout Momentum"} and latest.volume <= 0
     return {
-        "signal": signal,
-        "confidence": confidence,
-        "rsi": round(rsi, 2),
-        "macd": round(macd, 4),
-        "model": "Rule-assisted ML signal engine",
-        "note": "Demo model for the academic dashboard; not financial advice."
+        "signal": direction,
+        "confidence": None,
+        "strategy": config.name,
+        "strategy_config": config.model_dump(),
+        "rsi": round(float(latest.rsi), 2) if ready else None,
+        "macd": round(float(latest.get("macd", 0)), 4),
+        "model": "Deterministic technical rules",
+        "reason": "Volume unavailable for this strategy." if volume_missing else (
+            "Insufficient warmup candles." if not ready else f"{config.template}: {direction} on completed candle."),
+        "signal_time": latest.time.isoformat() if hasattr(latest.time, "isoformat") else str(latest.time),
+        "reference_price": float(latest.close),
+        "note": "Rule conditions are not a win probability. Entry is possible only after this candle closes.",
     }
